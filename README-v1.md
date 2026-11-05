@@ -362,7 +362,7 @@ RTX 5090 24GB 기준:
 
 
 
-10. Think 모드 (추론 모드) 사용법
+## 9. Think 모드 (추론 모드) 사용법
 
 Qwen3-8B는 추론(Chain-of-Thought) 모드를 지원합니다:
 
@@ -376,8 +376,8 @@ Qwen3-8B는 추론(Chain-of-Thought) 모드를 지원합니다:
 서울 날씨 알려줘.
 ```
 
-10. 검증 및 테스트
-10.1 기본 동작 확인
+## 10. 검증 및 테스트
+### 10.1 기본 동작 확인
 
 ```Bash
 # Ollama 설치 확인
@@ -390,20 +390,26 @@ curl http://localhost:8000/health
 watch -n 1 nvidia-smi
 ```
 
-11. 문제 해결 (트러블슈팅)
-11.1 DNS 오류 (가장 흔한 문제)
+## 11. 문제 해결 (트러블슈팅)
+### 11.1 DNS 오류 (가장 흔한 문제)
 
 ```Bash
 # 해결 방법: Google DNS 추가
 sudo bash -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf'
-13. 유용한 명령어 모음Bash# === Ollama ===
+```
+
+## 12. 유용한 명령어 모음
+
+```Bash
+# === Ollama ===
+
 ollama list                    # 설치된 모델 목록
 ollama show qwen3:8b           # 모델 정보
 ollama rm qwen3:8b             # 모델 삭제
 ```
 
-13. Qwen3 전체 모델 다운로드
-13.1 중복 다운로드 예방을 적용한 다운로드 예시
+## 13. Qwen3 전체 모델 다운로드
+## 13.1 중복 다운로드 예방을 적용한 다운로드 예시
 
 ```Bash
 # 기존에 동일 파일 존재 시 자동으로 확인 후 다음 단계로 패스(-c 옵션 사용)
@@ -412,7 +418,7 @@ aria2c -x 16 -s 16 -k 1M -c \
   "[https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf](https://huggingface.co/Qwen/Qwen3-0.6B-GGUF/resolve/main/Qwen3-0.6B-Q8_0.gguf)"
 ```
 
-14. 디렉토리 구조 (권장)
+## 14. 디렉토리 구조 (권장)
 
 ```
 /home/gotree94/Desktop/
@@ -425,7 +431,7 @@ aria2c -x 16 -s 16 -k 1M -c \
 └── test_qwen3.py                      ← 테스트 스크립트
 ```
 
-15. 빠른 시작
+## 15. 빠른 시작
 
 ```Bash
 # 설치 전 기존 모델 확인 후 바로 시작하는 자동 1줄 명령어
