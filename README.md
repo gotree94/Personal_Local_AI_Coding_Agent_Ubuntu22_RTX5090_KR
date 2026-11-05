@@ -1,0 +1,2 @@
+# Personal_Local_AI_Coding_Agent_Ubuntu22_RTX5090_KR
+Personal_Local_AI_Coding_Agent_Ubuntu22_RTX5090_KR
