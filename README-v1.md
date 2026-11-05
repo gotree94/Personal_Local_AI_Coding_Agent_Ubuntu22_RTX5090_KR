@@ -168,9 +168,9 @@ if [ -f "$GGUF_FILE" ]; then
 fi
 ```
 
-6. 설치 방법 (4가지 경로)
+## 6. 설치 방법 (4가지 경로)
 
-방법 1: Ollama (가장 간단, 5분)
+### 방법 1: Ollama (가장 간단, 5분)
 
 ```Bash
 # Step 1: Ollama 설치 상태 확인
@@ -192,7 +192,7 @@ else
 fi
 ```
 
-Ollama 태그 옵션:
+### Ollama 태그 옵션:
 
 | 태그 | 크기 | 설명 | 
 |:------:|:------:|:------:|
@@ -200,7 +200,7 @@ Ollama 태그 옵션:
 | qwen3:8b-q8_0 | ~8.5GB | Q8 양자화 (더 정확) | 
 | qwen3:8b-fp16 | ~16GB | 전정밀도 (최고 품질) | 
 
-API 서버로 실행:
+### API 서버로 실행:
 
 ```Bash
 ollama serve
@@ -212,7 +212,7 @@ curl http://localhost:11434/api/chat -d '{
 }'
 ```
 
-방법 2: vLLM (프로덕션 서빙, OpenAI 호환 API)
+### 방법 2: vLLM (프로덕션 서빙, OpenAI 호환 API)
 
 ```Bash
 # 1) 가상환경 확인 및 생성
@@ -232,7 +232,7 @@ pip install --upgrade "vllm>=0.9.0"
 vllm serve Qwen/Qwen3-8B --host 0.0.0.0 --port 8000
 ```
 
-방법 3: HuggingFace Transformers (개발용)
+### 방법 3: HuggingFace Transformers (개발용)
 
 ```Bash
 # 1) 가상환경 및 패키지 점검
@@ -280,7 +280,7 @@ response = tokenizer.decode(outputs[0][inputs["input_ids"].shape[-1]:], skip_spe
 print(response)
 ```
 
-방법 4: llama.cpp (GGUF 양자화 모델)
+### 방법 4: llama.cpp (GGUF 양자화 모델)
 
 ```Bash
 # 1) 기존 빌드 존재 여부 점검
@@ -321,8 +321,9 @@ fi
 ```
 
 
-6.1 빠른 다운로드 방법 (25Mbps 제한적 네트워크 환경)
-다운로드전 이전 버전 및 이어받기 처리 (-c 옵션)
+### 6.1 빠른 다운로드 방법 (25Mbps 제한적 네트워크 환경)
+
+### 다운로드전 이전 버전 및 이어받기 처리 (-c 옵션)
 
 aria2c 사용 시 -c (continue) 옵션을 추가하면 기존에 일부 다운로드된 파일의 크기와 체크섬을 확인한 후 동일한 파일 버전이면 재다운로드를 자동으로 방지하거나 남아있는 부분부터 계속 진행합니다.
 
@@ -334,16 +335,30 @@ aria2c -x 16 -s 16 -k 1M -c \
   "[https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf](https://huggingface.co/Qwen/Qwen3-8B-GGUF/resolve/main/Qwen3-8B-Q4_K_M.gguf)"
 ```
 
-7. 설치 방법 비교
+## 7. 설치 방법 비교
 
-항목OllamavLLMTransformersllama.cpp설치 난이도⭐ 매우 쉬움⭐⭐ 보통⭐⭐ 보통⭐⭐⭐ 어려움시작 시간5분15분15분30분+API 서버✅ 내장✅ OpenAI 호환❌ 별도 구현✅ 내장양자화 선택태그로 선택자동자동자유도 높음GPU 활용도우수최적우수우수프로덕션적합최적개발용적합추천 대상초보자/개인서버/서비스연구/개발고급 사용자
+| 항목 | Ollama | vLLM | Transformers | llama.cpp | 
+|:-------:|:-------:|:-------:|:-------:|:-------:|
+| 설치 난이도 | ⭐ 매우 쉬움 | ⭐⭐ 보통 | ⭐⭐ 보통 | ⭐⭐⭐ 어려움 | 
+| 시작 시간 | 5분 | 15분 | 15분 | 30분+ | 
+| API 서버 | ✅ 내장 | ✅ OpenAI 호환 | ❌ 별도 구현 | ✅ 내장 | 
+| 양자화 선택 | 태그로 선택 | 자동 | 자동 | 자유도 높음 | 
+| GPU 활용도 | 우수 | 최적 | 우수 | 우수 | 
+| 프로덕션 | 적합 | 최적 | 개발용 | 적합 | 
+| 추천 대상 | 초보자/개인 | 서버/서비스 | 연구/개발 | 고급 사용자 | 
 
 
 
-8. 추천 양자화 (Quantization) 가이드
+## 8. 추천 양자화 (Quantization) 가이드
 RTX 5090 24GB 기준:
 
-양자화VRAM 사용속도품질추천BF16 (FP16)~16GB최고최고✅ 추천 (24GB이므로 여유)Q8_0~9GB빠름매우 높음좋음Q6_K~7GB빠름높음좋음Q4_K_M~5GB매우 빠름양호기본값Q4_K_S~5GB매우 빠름보통RAM 부족 시
+| 양자화 | VRAM 사용 | 속도 | 품질 | 추천 | 
+|:-------:|:-------:|:-------:|:-------:|:-------:|
+| BF16 (FP16) | ~16GB | 최고 | 최고 | ✅ 추천 (24GB이므로 여유) | 
+| Q8_0 | ~9GB | 빠름 | 매우 높음 | 좋음 | 
+| Q6_K | ~7GB | 빠름 | 높음 | 좋음 | 
+| Q4_K_M | ~5GB | 매우 빠름 | 양호 | 기본값 | 
+| Q4_K_S | ~5GB | 매우 빠름 | 보통 | RAM 부족 시 | 
 
 
 
