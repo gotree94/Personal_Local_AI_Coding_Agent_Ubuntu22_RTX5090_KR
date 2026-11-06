@@ -2,14 +2,53 @@
 ## Ubuntu 22.04 + RTX 5090 Laptop GPU 24GB 구축 및 사용 가이드
 
 - 목표: OpenCode 없이 독립적으로 실행되는 개인용 로컬 AI 코딩 에이전트
-- 하드웨어: Intel Core Ultra 9 275HX / RAM 64GB / RTX 5090 Laptop GPU 24GB / Ubuntu 22.04 LTS
+- 하드웨어: Intel Core Ultra 9 275HX (24 threads) / RAM 64GB / RTX 5090 Laptop GPU 24GB / Ubuntu 22.04 LTS
 - 주요 업무: C, Verilog, VHDL, SystemVerilog, 기술 문서 번역, Git 프로젝트 관리
-- 기본 아키텍처: **Ollama + Hermes Agent**
-- 보조/대안 UI: **Roo Code 또는 Cline + Ollama**
-- 문서 기준일: 2026-11-05
+- 기본 아키텍처: **Ollama + Hermes Agent** (권장)
+- 대안: **Roo Code / Cline / Aider + Ollama**
+- 문서 기준일: 2026-11-06 (현재 PC 실측 기준)
 
 > 중요: Ollama는 LLM 추론 서버이고, 파일 읽기·수정·터미널 명령은 에이전트(Hermes, Roo Code 등)가 수행한다.
 > 따라서 로컬 파일 접근 권한은 모델이 아니라 에이전트 프로세스의 Linux 사용자 권한과 도구 승인 정책으로 결정된다.
+
+> Ollama + Hermes 조합은 필수가 아니다. 핵심은 **모델 서버(Ollama)와 에이전트(Hermes/Roo Code/Cline/Aider)를 분리**하는 것이다.
+> 그러면 에이전트를 바꿔도 모델을 다시 받을 필요가 없고, 모델을 바꿔도 에이전트 설정만 수정하면 된다.
+
+---
+
+# 0. 현재 설치 상태 (2026-11-06 실측)
+
+이 문서는 아래 실측 상태를 기준으로 한다. **새로 다운로드하지 않고도 바로 에이전트를 사용할 수 있는 상태**다.
+
+| 항목 | 실측값 |
+|---|---|
+| OS | Ubuntu 22.04.5 LTS, kernel 6.8 |
+| CPU | Intel Core Ultra 9 275HX, 24 threads |
+| RAM | 62Gi (64GB) |
+| GPU | NVIDIA RTX 5090 Laptop GPU, 24463 MiB, driver 580.159.04 |
+| Ollama | 0.33.3, systemd `ollama` 서비스 active |
+| Ollama 컨텍스트 env | `OLLAMA_CONTEXT_LENGTH=64000` |
+| Hermes Agent | v0.22.4 (2026.9.24), `~/.hermes/config.yaml` 존재 |
+| Hermes 현재 설정 | model `qwen2.5-coder-64k`, provider `custom`, base_url `http://127.0.0.1:11434/v1` |
+
+설치된 모델:
+
+| 모델 | 크기 | 모델 네이티브 컨텍스트 | 도구 호출 | 권장 역할 |
+|---|---:|---:|---|---|
+| `qwen2.5-coder:7b` | 4.7GB | 32K | 지원 | 코드 기준선 |
+| `qwen2.5-coder-local:latest` | 4.7GB | 32K (`num_ctx 16384`) | 지원 | 짧은 코드 작업 |
+| `qwen2.5-coder-64k:latest` | 4.7GB | 32K (`num_ctx 64000` 설정) | 지원 | 코드 작업, 단 실제 실행은 32K |
+| `deepseek-r1:8b` | 5.2GB | 128K | 지원 (thinking) | 추론, 긴 문맥 |
+| `llama3.1:8b` | 4.9GB | 128K | 지원 | 긴 문맥 에이전트 |
+| `exaone3.5:7.8b` | 4.8GB | 32K | **미지원** | 한국어 번역/문서 전용 |
+
+실측으로 확인된 주의사항:
+
+- `qwen2.5-coder-64k`는 이름과 Modelfile의 `num_ctx 64000`에도 불구하고 **Ollama 0.33.3에서 실제로는 32768 컨텍스트로 실행된다.** Ollama 로그에 `requested context size too large for model num_ctx=64000 n_ctx_train=32768` 경고가 남고, `ollama ps`의 CONTEXT도 32768로 표시된다. 즉 "이름만 64K"인 상태다.
+- 64K가 실제로 필요한 Hermes 작업에는 `llama3.1:8b` 또는 `deepseek-r1:8b`를 사용한다. 둘 다 네이티브 128K다. 실측에서 `llama3.1:8b`를 `num_ctx 65536`으로 실행하면 `ollama ps`에 CONTEXT=65536, VRAM 약 13GB로 표시됐다.
+- `exaone3.5:7.8b`는 capabilities에 `completion`만 있고 tool calling이 없어 Hermes/Roo/Cline의 에이전트 모델로는 부적합하다. 번역/요약용으로만 사용한다.
+- `deepseek-r1:8b`는 현재 설치본 기준 architecture `qwen3`, 128K 컨텍스트, `tools`와 `thinking`을 지원한다. 다만 thinking 때문에 응답이 느릴 수 있다.
+- Hermes v0.22.4는 32K 모델로도 응답했지만, 공식 요구사항은 최소 64K이므로 긴 다단계 작업에서는 32K 모델이 불안정할 수 있다.
 
 ---
 
@@ -93,21 +132,47 @@ RTX 5090 Laptop GPU의 VRAM은 24GB다. 30B급 MoE 모델의 Q4 양자화 파일
 - 동시 요청: 1개부터 시작
 - GPU 메모리 부족 시: 더 작은 모델/양자화 또는 CPU 오프로딩을 검토
 - 64GB 시스템 RAM: 일부 CPU 오프로딩에 도움은 되지만 속도가 느려질 수 있음
+- **중요:** 컨텍스트를 64K로 늘리려면 모델 자체의 네이티브 컨텍스트가 64K 이상이어야 한다. Ollama 0.33.3은 네이티브보다 큰 `num_ctx`를 받으면 `requested context size too large for model` 경고를 남기고 네이티브 값으로 클램프한다. `qwen2.5-coder` 계열은 네이티브가 32K라서 64K로 늘릴 수 없다.
 
 중요한 현실적 제약: Qwen3-Coder 30B Q4 파일은 약 19GB다. 여기에 64K 컨텍스트의 KV cache와 런타임 메모리가 더해지므로 RTX 5090 Laptop 24GB에서 항상 전부 GPU에 상주한다고 보장할 수 없다. Hermes가 요구하는 64K를 맞춘 상태에서 실제 `ollama ps`와 `nvidia-smi`로 GPU/CPU 분할을 확인해야 한다. 메모리 부족이나 과도한 CPU 오프로딩이 발생하면 14B급 모델 또는 더 작은 양자화를 우선 사용한다.
 
-## 2.2 모델 전략
+## 2.2 지금 사용할 모델 (이미 설치됨)
 
-모델 태그와 제공되는 양자화는 시점에 따라 바뀐다. 설치 전에 Ollama Library에서 정확한 태그, 크기, 컨텍스트, 도구 호출 지원을 확인한다.
+현재 네트워크가 좋지 않으므로 **추가 다운로드 없이 설치된 모델로 에이전트를 먼저 완성**한다. 아래는 이 PC에서 실제 확인한 값이다.
 
-추천 비교군:
+| 역할 | 모델 | 실제 컨텍스트 | 도구 호출 | 운용 |
+|---|---|---:|---|---|
+| 코드/에이전트 기본 | `qwen2.5-coder-64k:latest` | 32K (64K 이름이지만 클램프됨) | 지원 | 코드 품질 우선, 짧은~중간 작업 |
+| 긴 문맥 에이전트 | `llama3.1:8b` | 128K (64K 실행 확인) | 지원 | Hermes 메인 권장 |
+| 추론/설계 검토 | `deepseek-r1:8b` | 128K | 지원 (thinking) | 복잡한 원인 분석 |
+| 한국어 번역/문서 | `exaone3.5:7.8b` | 32K | **미지원** | Hermes가 아닌 일반 채팅/번역 전용 |
+| 빠른 코드 보조 | `qwen2.5-coder-local:latest` | 16K | 지원 | 짧은 코드 생성 |
 
-| 역할 | 후보 | 운용 |
-|---|---|---|
-| 주력 코딩/에이전트 | Qwen3-Coder 30B-A3B 계열 | 16K~32K부터 테스트 |
-| 대안 코딩/추론 | GLM-4.7-Flash 계열 | 동일 테스트로 비교 |
-| 빠른 보조/번역 | Qwen3 14B 계열 | 주력 모델과 교체 운용 |
-| 기존 기준선 | 기존 Qwen2.5-Coder 7B | 속도와 도구 호출 비교 |
+권장 조합:
+
+1. **Hermes 메인 모델은 `llama3.1:8b`**로 시작한다. 실제 64K가 보장되고 VRAM도 약 13GB로 24GB에 여유가 있다.
+2. 코드 품질이 더 중요한 짧은 작업은 `qwen2.5-coder-64k`를 쓴다. 단, 실제 컨텍스트는 32K라는 점을 감안한다.
+3. 번역/문서 작업은 `exaone3.5:7.8b`를 별도 채팅으로 사용한다. 도구 호출이 없으므로 에이전트로 쓰지 않는다.
+4. 모델을 동시에 여러 개 올리지 않는다. 24GB GPU에서는 하나씩 전환한다.
+
+## 2.3 나중에 설치할 고성능 모델 (네트워크 회복 후)
+
+모델 태그와 양자화는 시점에 따라 바뀐다. 설치 전에 Ollama Library에서 정확한 태그, 크기, 컨텍스트, 도구 호출 지원을 확인한다. 아래는 2026-11 기준 24GB VRAM을 고려한 후보이다.
+
+| 모델 | 파일 크기 | 네이티브 컨텍스트 | 24GB + 64K 적합성 | 특징 |
+|---|---:|---:|---|---|
+| `qwen3.5:9b` | 6.6~7.6GB | 256K | **여유 있음** | 최신 범용, vision/tools/thinking, 가장 안전한 업그레이드 |
+| `qwen3-coder:30b` | 19GB | 256K | 64K 시 일부 CPU 오프로딩 가능 | 에이전트 코딩 특화, 코드 품질 최우선 |
+| `glm-4.7-flash` | 19GB | 198K | 64K 시 일부 CPU 오프로딩 가능 | 30B-A3B MoE, SWE-bench 강점 |
+| `qwen3.5:27b` | 17~20GB | 256K | 64K 시 빠듯/오프로딩 | 고품질 범용 |
+| `qwen3.5:35b` | 22GB | 256K | 64K 전체 GPU 적재 어려움 | 권장하지 않음 |
+
+선택 기준:
+
+- **품질과 안정성의 균형:** `qwen3.5:9b` (24GB에서 64K를 넉넉히 확보)
+- **코딩 에이전트 최우선:** `qwen3-coder:30b` (속도보다 품질, 일부 CPU 오프로딩 감수)
+- **대안 코딩/추론:** `glm-4.7-flash`
+- 30B급 MoE는 파일이 19GB이고 64K KV cache가 추가되어 24GB를 넘을 수 있다. 이때는 `ollama ps`의 PROCESSOR가 `100% GPU`인지 확인하고, CPU 오프로딩이 크면 `qwen3.5:9b`로 낮춘다.
 
 모든 모델을 동시에 메모리에 올리지 않는다. 24GB GPU에서는 모델 하나씩 전환하는 운영을 권장한다.
 
@@ -134,8 +199,17 @@ cp -a ~/.config/opencode ~/local-ai-backup/opencode-$(date +%Y%m%d) 2>/dev/null 
 
 ollama --version
 ollama list
+ollama show qwen2.5-coder-64k
 ollama ps
 nvidia-smi
+hermes --version
+hermes doctor
+```
+
+현재 Hermes 설정 확인:
+
+```bash
+grep -nE '^(model|providers|local_runtime):|^  (default|provider|base_url|context_length|ollama_num_ctx):' ~/.hermes/config.yaml
 ```
 
 GPU 드라이버 확인:
@@ -196,29 +270,27 @@ systemctl show ollama --property=Environment
 
 기본 설치에서는 별도의 `OLLAMA_HOST` 변경을 하지 않는다. `0.0.0.0`으로 바꾸지 않는다.
 
-## 4.3 모델 다운로드
+## 4.3 지금 사용할 모델 확인 (다운로드 없이)
 
-Ollama Library에서 최신 정확한 태그를 확인한다. 예시:
-
-```bash
-ollama pull qwen3-coder:30b
-```
-
-Qwen3-Coder 30B는 약 19GB의 Q4 모델 파일로 안내되며 256K native context를 표방하지만, Hermes 사용 시에는 64K 실행 컨텍스트의 추가 메모리까지 고려해야 한다. 24GB VRAM에서 30B 모델이 GPU에 완전히 적재될 것이라고 가정하지 않는다. 실제 메모리 상태를 측정하고, 필요하면 더 작은 모델을 선택한다.
-
-모델 태그가 라이브러리에서 변경되었거나 존재하지 않으면 해당 모델 페이지의 실제 태그를 사용한다.
-
-모델 확인:
+현재 네트워크가 좋지 않으므로 새 모델을 받지 말고 **이미 설치된 모델**을 사용한다.
 
 ```bash
 ollama list
-ollama show qwen3-coder:30b
+ollama show qwen2.5-coder-64k
+ollama show llama3.1:8b
+ollama show deepseek-r1:8b
 ```
 
-간단한 추론 테스트:
+확인 포인트:
+
+- `ollama show`의 `context length`는 모델의 **네이티브 컨텍스트**다.
+- `Parameters`의 `num_ctx`는 Modelfile 기본값이다.
+- **실제 실행 컨텍스트는 `ollama ps`의 CONTEXT 열로 확인한다.** 요청한 `num_ctx`가 네이티브보다 크면 Ollama가 클램프한다.
+
+간단한 추론 테스트(모델 하나만 로드):
 
 ```bash
-ollama run qwen3-coder:30b
+ollama run llama3.1:8b
 ```
 
 프롬프트:
@@ -232,57 +304,171 @@ Explain the algorithm briefly and provide a small test program.
 
 ```bash
 watch -n 1 nvidia-smi
-```
-
-실행 모델 확인:
-
-```bash
 ollama ps
 ```
 
-## 4.4 컨텍스트 설정
-
-일반 Ollama 대화는 16K~32K부터 시험할 수 있지만, Hermes Agent는 현재 공식 Quickstart 기준 최소 64,000 tokens의 컨텍스트를 요구한다. Hermes와 연결할 모델은 64K를 실제로 지원하고 서버에도 64K로 설정되어 있어야 한다. Ollama의 `num_ctx` 설정 방법은 설치된 버전의 공식 문서를 확인한다.
-
-Modelfile 예시:
+정상 예시 (실측):
 
 ```text
-FROM qwen3-coder:30b
+NAME           SIZE    PROCESSOR    CONTEXT
+llama3.1:8b    13 GB   100% GPU     65536
+```
+
+### 대표 예시: 설치된 `qwen2.5-coder-64k`로 바로 시작
+
+현재 Hermes 설정도 이 모델을 가리키고 있으므로 추가 설치 없이 바로 쓸 수 있다.
+
+```bash
+ollama run qwen2.5-coder-64k
+```
+
+```text
+현재 디렉토리의 C 프로젝트 구조를 읽기 전용으로 분석해줘.
+파일을 수정하지 말고 빌드 방법과 테스트 방법만 정리해줘.
+```
+
+단, 이 모델의 실제 컨텍스트는 32K다. 64K가 필요한 긴 작업은 아래 `llama3.1:8b` 예시로 바꾼다.
+
+## 4.4 컨텍스트 설정 (실측 기준)
+
+Ollama는 기본 컨텍스트가 낮고(VRAM에 따라 4K/32K), Hermes Agent는 공식적으로 최소 64,000 tokens를 요구한다. 서버 기본값을 올리는 방법과 모델별로 고정하는 방법이 있다.
+
+### 방법 A: Ollama 서비스 전체 기본값
+
+```bash
+sudo systemctl edit ollama.service
+```
+
+```ini
+[Service]
+Environment="OLLAMA_CONTEXT_LENGTH=64000"
+```
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+systemctl show ollama --property=Environment
+```
+
+이 PC에는 이미 `OLLAMA_CONTEXT_LENGTH=64000`이 설정되어 있다.
+
+### 방법 B: 모델별 Modelfile
+
+```text
+FROM llama3.1:8b
 PARAMETER num_ctx 65536
 ```
 
-```
-FROM qwen2.5-coder:7b
-PARAMETER num_ctx 16384
+```bash
+ollama create llama3.1-64k -f Modelfile
+ollama run llama3.1-64k
 ```
 
-생성 및 실행:
+> **중요:** `qwen2.5-coder:7b` 계열은 네이티브가 32K이므로 Modelfile에 `num_ctx 65536`을 넣어도 실제 실행은 32768로 클램프된다. 실측 로그:
+> `requested context size too large for model num_ctx=64000 n_ctx_train=32768`.
+> 따라서 진짜 64K가 필요하면 `llama3.1:8b` 또는 `deepseek-r1:8b`(둘 다 네이티브 128K)를 사용한다.
+
+### Hermes 설정 맞추기
+
+Hermes가 자동 감지한 값이 모델의 네이티브 값(예: 32768)이면, 64K 모델에서는 아래처럼 명시한다.
+
+```yaml
+model:
+  default: "llama3.1:8b"
+  provider: "custom"
+  base_url: "http://127.0.0.1:11434/v1"
+  ollama_num_ctx: 65536
+  context_length: 65536
+```
+
+- `ollama_num_ctx`: Hermes가 Ollama에 매 요청마다 보내는 `num_ctx`
+- `context_length`: Hermes가 대화 압축을 결정할 때 쓰는 전체 컨텍스트
+
+설정 후 실제 실행 컨텍스트 확인:
 
 ```bash
-ollama create qwen3-coder-local -f Modelfile
-ollama run qwen3-coder-local
+hermes -z "Reply with exactly: READY"
+ollama ps
 ```
 
-```
-(base) gotree94@gotree94-ROG-Strix-SCAR-16-G635LX-G635LX:~$ ollama create qwen2.5-coder-local -f Modelfile
-gathering model components 
-using existing layer sha256:60e05f2100071479f596b964f89f510f057ce397ea22f2833a0cfe029bfc2463 
-using existing layer sha256:66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e 
-using existing layer sha256:1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320 
-using existing layer sha256:832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e 
-creating new layer sha256:58e1b82a691f46c155e57be607f1031930ea0cccc22daf4447f91d360f74b2d2 
-writing manifest 
-success 
-(base) gotree94@gotree94-ROG-Strix-SCAR-16-G635LX-G635LX:~$ ollama run qwen2.5-coder-local
->>> Send a message (/? for help)
+CONTEXT가 65536으로 표시되어야 한다. 32768로 표시되면 모델 네이티브 컨텍스트가 부족한 것이므로 64K 이상 모델로 바꾼다.
+
+## 4.5 나중에 고성능 모델 설치 (네트워크 회복 후)
+
+지금은 설치된 모델로 작업하고, 네트워크가 회복되면 아래 순서로 업그레이드한다. **한 번에 하나씩** 설치하고, 각 단계마다 `ollama ps`와 `nvidia-smi`로 VRAM을 확인한다.
+
+### 1) 후보 선택
+
+- 안정적인 균형: `qwen3.5:9b` (약 7GB, 256K, tools/vision/thinking)
+- 코딩 에이전트 최우선: `qwen3-coder:30b` (약 19GB, 256K, tools)
+- 대안: `glm-4.7-flash` (약 19GB, 198K, tools/thinking)
+
+### 2) 다운로드
+
+```bash
+ollama pull qwen3.5:9b
+ollama show qwen3.5:9b
 ```
 
-모델이 24GB VRAM을 초과하면 다음 순서로 조정한다.
+30B급을 선택한 경우:
 
-1. `num_ctx`를 16384로 줄인다.
-2. 더 작은 양자화/모델 태그를 선택한다.
-3. 불필요한 다른 GPU 프로세스를 종료한다.
-4. CPU 오프로딩이 발생하는지 `ollama ps`와 `nvidia-smi`로 확인한다.
+```bash
+ollama pull qwen3-coder:30b
+ollama show qwen3-coder:30b
+```
+
+> 네트워크가 불안정하면 중간에 끊겨도 `ollama pull`을 다시 실행하면 이어받는다. 디스크 여유 공간은 모델 크기의 2배 이상을 확보한다.
+
+### 3) 64K 모델 생성
+
+```bash
+printf 'FROM qwen3.5:9b\nPARAMETER num_ctx 65536\n' > Modelfile.qwen35
+ollama create qwen3.5-9b-64k -f Modelfile.qwen35
+ollama run qwen3.5-9b-64k
+```
+
+```bash
+printf 'FROM qwen3-coder:30b\nPARAMETER num_ctx 65536\n' > Modelfile.qwen3coder
+ollama create qwen3-coder-64k -f Modelfile.qwen3coder
+ollama run qwen3-coder-64k
+```
+
+> 256K 네이티브 모델이므로 `num_ctx 65536`이 정상적으로 적용된다. `ollama ps`의 CONTEXT가 65536인지 확인한다.
+
+### 4) 메모리 적합성 확인
+
+```bash
+watch -n 1 nvidia-smi
+ollama ps
+```
+
+- `PROCESSOR`가 `100% GPU`이면 쾌적하다.
+- `100% GPU`가 아니거나 CPU 비중이 크면 64K 컨텍스트의 KV cache가 VRAM을 초과한 것이다. 다음 순서로 조정한다.
+  1. `num_ctx`를 32768로 낮춘다.
+  2. 더 작은 모델(`qwen3.5:9b`)로 내린다.
+  3. 다른 GPU 프로세스를 종료한다.
+  4. KV cache 양자화(`OLLAMA_KV_CACHE_TYPE=q8_0`)를 지원하는 버전이면 적용을 검토한다.
+
+### 5) Hermes 모델 전환
+
+대화형으로 전환:
+
+```bash
+hermes model
+```
+
+또는 `~/.hermes/config.yaml` 수정:
+
+```yaml
+model:
+  default: "qwen3.5-9b-64k"
+  provider: "custom"
+  base_url: "http://127.0.0.1:11434/v1"
+  ollama_num_ctx: 65536
+  context_length: 65536
+```
+
+이전 모델은 삭제하지 말고 남겨 둔다. 새 모델이 느리거나 품질이 낮으면 `hermes model`로 즉시 되돌린다.
 
 ---
 
@@ -292,7 +478,15 @@ success
 
 Hermes는 범용 에이전트이며 파일·터미널 도구를 사용할 수 있다. 다만 도구 이름, 설정 파일 형식, provider 설정 절차는 릴리스마다 달라질 수 있다. 반드시 현재 공식 설치 가이드와 `hermes --help`를 기준으로 진행한다.
 
-**중요한 최신 요구사항:** Hermes Agent Quickstart는 로컬 모델을 포함해 최소 64,000 tokens 컨텍스트를 요구한다고 안내한다. 따라서 앞서 모델 단독 테스트에서 사용한 16K/32K 설정을 그대로 Hermes에 연결하면 시작 단계에서 거부될 수 있다. Hermes용 Ollama 모델은 실제 유효 컨텍스트를 64K 이상으로 설정하고, Hermes에도 같은 값을 지정한다.
+**중요한 최신 요구사항:** Hermes Agent Quickstart는 로컬 모델을 포함해 최소 64,000 tokens 컨텍스트를 요구한다고 안내한다. 따라서 앞서 모델 단독 테스트에서 사용한 16K/32K 설정을 그대로 Hermes에 연결하면 긴 작업에서 불안정할 수 있다. Hermes용 Ollama 모델은 실제 유효 컨텍스트를 64K 이상으로 설정하고, Hermes에도 같은 값을 지정한다.
+
+이 PC에는 Hermes Agent v0.22.4가 이미 설치되어 있으므로 새로 설치하지 않아도 된다. 가장 간단한 시험 경로는 Ollama 0.33.3의 통합 런처다.
+
+```bash
+ollama launch hermes --model llama3.1:8b
+```
+
+실행 후 다른 터미널에서 `ollama ps`로 CONTEXT가 65536인지 확인한다. 런처가 기대한 컨텍스트를 잡지 못하면 아래 5.2의 `~/.hermes/config.yaml`을 직접 설정한다.
 
 ## 5.1.1 대안: Hermes 자체 Local Models 런타임
 
@@ -321,26 +515,55 @@ hermes --help
 
 ## 5.2 Ollama 연결 원칙
 
-Hermes 공식 Quickstart의 최소 컨텍스트 요구사항은 64K다. 예를 들어 Ollama Modelfile에서 `PARAMETER num_ctx 65536`을 설정하고, Hermes의 모델 설정에서도 context length를 65536으로 맞춘다. 모델의 최대 지원 컨텍스트가 256K라고 표시되어 있어도 서버의 실제 실행 컨텍스트가 자동으로 256K가 되는 것은 아니다.
+Hermes 공식 Quickstart의 최소 컨텍스트 요구사항은 64K다. Ollama Modelfile에서 `PARAMETER num_ctx 65536`을 설정하고, Hermes의 모델 설정에서도 context length를 65536으로 맞춘다. 모델의 최대 지원 컨텍스트가 256K라고 표시되어 있어도 서버의 실제 실행 컨텍스트가 자동으로 256K가 되는 것은 아니다.
 
 Hermes 설정에서 다음 연결 정보를 사용한다.
 
-- Provider: Ollama 또는 OpenAI-compatible custom provider
+- Provider: `custom` (Ollama는 OpenAI-compatible custom endpoint로 연결)
 - Base URL: `http://127.0.0.1:11434/v1`
 - Model: 실제 `ollama list`에 표시되는 모델 식별자
-- API key: Hermes custom endpoint 설정 예시에서는 `ollama`를 placeholder로 사용한다.
-- Context length: 65536 이상. 모델과 Ollama 서버의 실제 실행 컨텍스트와 일치시킨다.
+- API key: 비워 두거나 `ollama`를 placeholder로 사용한다. Ollama는 키를 요구하지 않는다.
+- Context length: 모델의 네이티브 컨텍스트가 64K 이상일 때만 65536으로 설정한다.
 
-이전에 사용했던 사용자 환경에서는 다음 주소로 Ollama endpoint 검증에 성공한 이력이 있다.
+현재 설정과 동일한 예시 (`~/.hermes/config.yaml`):
 
-```text
-http://127.0.0.1:11434/v1
+```yaml
+model:
+  default: "llama3.1:8b"
+  provider: "custom"
+  base_url: "http://127.0.0.1:11434/v1"
+  ollama_num_ctx: 65536
+  context_length: 65536
 ```
+
+- `qwen2.5-coder`처럼 네이티브가 32K인 모델에 `ollama_num_ctx: 65536`을 줘도 Ollama가 32768로 클램프한다. 이 경우 `hermes doctor`는 통과해도 실제 컨텍스트는 32K다.
+- 실제 실행 컨텍스트는 항상 `ollama ps`의 CONTEXT 열로 확인한다.
+
+### 대표 예시: `llama3.1:8b`로 실제 64K Hermes 구성
+
+```bash
+# 1) 모델 단독 확인
+ollama run llama3.1:8b
+
+# 2) Hermes 모델 선택 (Custom endpoint)
+hermes model
+#   Base URL : http://127.0.0.1:11434/v1
+#   API key  : 비움 또는 ollama
+#   Model    : llama3.1:8b
+#   Context  : 65536
+
+# 3) 실제 실행 컨텍스트 확인
+cd ~/AI-Workspace/02_FPGA/Verilog
+hermes -z "Reply with exactly: READY"
+ollama ps
+```
+
+`ollama ps`에 `CONTEXT 65536`이 보이면 정상이다.
 
 설정은 대화형 설정 마법사를 우선 사용한다.
 
 ```bash
-hermes
+hermes model
 ```
 
 또는 현재 릴리스에서 제공하는 설정 명령을 확인한다.
@@ -784,6 +1007,27 @@ rm ./agent_write_test.tmp
 - 명령 실행 승인 대기 상태인지 확인
 - 단순 텍스트 응답 모드가 아니라 Agent 모드인지 확인
 
+## 64K로 설정했는데 실제 CONTEXT가 32K인 경우
+
+증상:
+
+```bash
+ollama ps
+# CONTEXT 열이 32768로 표시됨
+
+journalctl -u ollama --since "10 minutes ago" --no-pager | grep -i "requested context"
+# requested context size too large for model num_ctx=64000 n_ctx_train=32768
+```
+
+원인: 모델 자체의 네이티브 컨텍스트가 32K다. Modelfile의 `num_ctx`를 올려도 Ollama가 네이티브 값으로 클램프한다. 현재 설치된 모델 중 `qwen2.5-coder` 계열이 여기에 해당한다.
+
+해결:
+
+1. `ollama show <모델>`의 `context length`가 64K 이상인지 확인한다.
+2. 64K 이상 네이티브 모델로 바꾼다: `llama3.1:8b`, `deepseek-r1:8b`, `qwen3.5:9b`, `qwen3-coder:30b`, `glm-4.7-flash`.
+3. Hermes 설정에 `ollama_num_ctx`와 `context_length`를 65536으로 명시한다.
+4. `hermes -z "Reply with exactly: READY"` 실행 후 `ollama ps`에서 CONTEXT=65536을 확인한다.
+
 ## 컨텍스트가 부족한 경우
 
 - 불필요한 빌드 산출물, 바이너리, 대형 로그를 컨텍스트에서 제외
@@ -812,10 +1056,11 @@ rm ./agent_write_test.tmp
 
 - [ ] NVIDIA 드라이버 및 RTX 5090 인식
 - [ ] Ollama 설치 및 서비스 실행
-- [ ] 코딩 모델 다운로드
+- [ ] 기존 모델 확인 또는 코딩 모델 다운로드
 - [ ] Ollama 로컬 API 응답
 - [ ] Hermes Agent 설치/업데이트
 - [ ] Hermes에서 Ollama 모델 연결
+- [ ] `ollama ps`에서 실제 CONTEXT 64K 확인 (필요 시)
 - [ ] 작업 폴더에서 파일 읽기 성공
 - [ ] 테스트 파일 생성 및 수정 성공
 - [ ] 터미널 명령 실행 성공
@@ -838,12 +1083,12 @@ rm ./agent_write_test.tmp
 |---|---|
 | OS | Ubuntu 22.04 LTS |
 | GPU | RTX 5090 Laptop 24GB |
-| LLM Runtime | Ollama |
-| Primary Agent | Hermes Agent |
+| LLM Runtime | Ollama 0.33.3 |
+| Primary Agent | Hermes Agent v0.22.4 |
 | GUI 대안 | VS Code + Roo Code |
-| Primary Model | Qwen3-Coder 30B-A3B 계열 |
-| 비교 모델 | GLM-4.7-Flash 계열 |
-| 보조 모델 | Qwen3 14B 계열 |
+| **지금 쓸 모델** | **`llama3.1:8b` (64K 에이전트) + `qwen2.5-coder-64k` (코드, 32K)** |
+| 번역 모델 | `exaone3.5:7.8b` (도구 호출 없음, 별도 채팅) |
+| 나중에 업그레이드 | `qwen3.5:9b` (안정) / `qwen3-coder:30b` (코딩 최우선) / `glm-4.7-flash` (대안) |
 | C Toolchain | GCC / Clang / CMake |
 | Verilog | Icarus Verilog / Verilator |
 | VHDL | GHDL |
@@ -858,11 +1103,11 @@ rm ./agent_write_test.tmp
        ↓
 2. Ollama 상태 점검
        ↓
-3. 코딩 모델 다운로드
+3. 설치된 모델 확인 (지금은 다운로드 불필요)
        ↓
-4. Hermes Agent 설치/설정
+4. Hermes Agent 상태 확인 / 필요 시 업데이트
        ↓
-5. Ollama API 연결
+5. Ollama API 연결 (llama3.1:8b, 64K)
        ↓
 6. 로컬 파일 읽기/쓰기 검증
        ↓
@@ -870,11 +1115,13 @@ rm ./agent_write_test.tmp
        ↓
 8. Git 통합
        ↓
-9. 번역 작업 검증
+9. 번역 작업 검증 (exaone3.5)
        ↓
 10. 오프라인 테스트
        ↓
 11. 필요하면 Roo Code GUI 추가
+       ↓
+12. 네트워크 회복 후 고성능 모델로 교체
 ```
 
 **핵심 원칙:** 에이전트(Hermes/Roo Code)와 모델 서버(Ollama)를 분리한다. 그래야 나중에 모델 또는 에이전트를 바꾸더라도 나머지 환경을 유지할 수 있다.
@@ -889,11 +1136,15 @@ rm ./agent_write_test.tmp
 - Ollama Linux 설치: https://github.com/ollama/ollama/blob/main/docs/linux.md
 - Ollama 모델 라이브러리: https://ollama.com/library
 - Ollama OpenAI 호환 API: https://docs.ollama.com/api/openai-compatibility
+- Ollama Qwen2.5-Coder 모델: https://ollama.com/library/qwen2.5-coder
 - Ollama Qwen3-Coder 모델: https://ollama.com/library/qwen3-coder
+- Ollama Qwen3.5 모델: https://ollama.com/library/qwen3.5
+- Ollama GLM-4.7-Flash 모델: https://ollama.com/library/glm-4.7-flash
 - Ollama + Roo Code 연동: https://github.com/ollama/ollama/blob/main/docs/integrations/roo-code.mdx
 - Hermes Agent 저장소: https://github.com/NousResearch/hermes-agent
 - Hermes Agent 문서: https://hermes-agent.nousresearch.com/
 - Hermes Agent Quickstart (64K minimum context): https://hermes-agent.nousresearch.com/docs/getting-started/quickstart
+- Hermes + Ollama 로컬 설정 가이드: https://hermes-agent.nousresearch.com/docs/guides/local-ollama-setup
 - Hermes Local Models: https://hermes-agent.nousresearch.com/docs/user-guide/local-models
 - Roo Code 저장소: https://github.com/RooCodeInc/Roo-Code
 - Roo Code 문서: https://docs.roocode.com/
