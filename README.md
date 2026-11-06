@@ -251,11 +251,30 @@ FROM qwen3-coder:30b
 PARAMETER num_ctx 65536
 ```
 
+```
+FROM qwen2.5-coder:7b
+PARAMETER num_ctx 16384
+```
+
 생성 및 실행:
 
 ```bash
 ollama create qwen3-coder-local -f Modelfile
 ollama run qwen3-coder-local
+```
+
+```
+(base) gotree94@gotree94-ROG-Strix-SCAR-16-G635LX-G635LX:~$ ollama create qwen2.5-coder-local -f Modelfile
+gathering model components 
+using existing layer sha256:60e05f2100071479f596b964f89f510f057ce397ea22f2833a0cfe029bfc2463 
+using existing layer sha256:66b9ea09bd5b7099cbb4fc820f31b575c0366fa439b08245566692c6784e281e 
+using existing layer sha256:1e65450c30670713aa47fe23e8b9662bdf4065e81cc8e3cbfaa98924fcc0d320 
+using existing layer sha256:832dd9e00a68dd83b3c3fb9f5588dad7dcf337a0db50f7d9483f310cd292e92e 
+creating new layer sha256:58e1b82a691f46c155e57be607f1031930ea0cccc22daf4447f91d360f74b2d2 
+writing manifest 
+success 
+(base) gotree94@gotree94-ROG-Strix-SCAR-16-G635LX-G635LX:~$ ollama run qwen2.5-coder-local
+>>> Send a message (/? for help)
 ```
 
 모델이 24GB VRAM을 초과하면 다음 순서로 조정한다.
